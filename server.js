@@ -19,76 +19,121 @@ app.use(express.json());
 /* ===================== MONGODB CONNECT ===================== */
 mongoose
   .connect(MONGO_URI)
-  .then(() => {
-    console.log("✅ MongoDB Connected");
-  })
-  .catch((err) => {
-    console.error("❌ MongoDB Connection Error:", err);
-  });
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch((err) => console.error("❌ MongoDB Connection Error:", err));
 
 /* ===================== SCHEMA ===================== */
-const gpsSchema = new mongoose.Schema({
-  lat: {
-    type: Number,
-    required: true,
+const gpsSchema = new mongoose.Schema(
+  {
+    lat: { type: Number, required: true },
+    lng: { type: Number, required: true },
+    time: { type: String, required: true },
   },
-  lng: {
-    type: Number,
-    required: true,
-  },
-  time: {
-    type: String,
-    required: true,
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+  { timestamps: true }, // adds createdAt, updatedAt
+);
 
-/* ===================== MODEL ===================== */
 const GPS = mongoose.model("GPS", gpsSchema);
 
 /* ===================== ROUTES ===================== */
 
-// Health check (Render)
+/* -------- Health Check -------- */
 app.get("/", (req, res) => {
-  res.status(200).send("🚀 ESP32 GPS API is running");
+  res.send("🚀 ESP32 GPS API is running");
 });
 
-// Receive GPS data from ESP32
+/* -------- POST GPS DATA -------- */
 app.post("/api/gps", async (req, res) => {
   try {
     const { lat, lng, time } = req.body;
 
-    // Validation
     if (lat === undefined || lng === undefined || !time) {
       return res.status(400).json({
         success: false,
-        message: "lat, lng and time are required",
+        message: "lat, lng, time are required",
       });
     }
 
-    // Save to DB
-    const gpsData = new GPS({
-      lat,
-      lng,
-      time,
-    });
+    const gps = new GPS({ lat, lng, time });
+    await gps.save();
 
-    await gpsData.save();
+    console.log("📍 Saved:", gps);
 
-    console.log("📍 GPS Data Saved:", gpsData);
-
-    return res.status(201).json({
+    res.status(201).json({
       success: true,
-      message: "GPS data stored successfully",
+      message: "GPS data saved",
     });
-  } catch (error) {
-    console.error("❌ Error saving GPS data:", error);
-    return res.status(500).json({
+  } catch (err) {
+    console.error("❌ POST error:", err);
+    res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: "Server error",
+    });
+  }
+});
+
+/* -------- GET LATEST GPS -------- */
+app.get("/api/gps/latest", async (req, res) => {
+  try {
+    const data = await GPS.findOne().sort({ createdAt: -1 });
+
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        message: "No data found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data,
+    });
+  } catch (err) {
+    console.error("❌ Latest error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+});
+
+/* -------- GET PAGINATED + FILTERED DATA -------- */
+app.get("/api/gps", async (req, res) => {
+  try {
+    const { page = 1, limit = 10, from, to, sort = "desc" } = req.query;
+
+    const query = {};
+
+    // Date filter
+    if (from || to) {
+      query.createdAt = {};
+      if (from) query.createdAt.$gte = new Date(from);
+      if (to) query.createdAt.$lte = new Date(to);
+    }
+
+    const skip = (page - 1) * limit;
+
+    const data = await GPS.find(query)
+      .sort({ createdAt: sort === "asc" ? 1 : -1 })
+      .skip(Number(skip))
+      .limit(Number(limit));
+
+    const total = await GPS.countDocuments(query);
+
+    res.json({
+      success: true,
+      pagination: {
+        totalRecords: total,
+        currentPage: Number(page),
+        totalPages: Math.ceil(total / limit),
+        limit: Number(limit),
+      },
+      data,
+    });
+  } catch (err) {
+    console.error("❌ GET error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
     });
   }
 });
