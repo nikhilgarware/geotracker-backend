@@ -57,6 +57,7 @@ app.use(
     origin: [
       "http://localhost:5173", // for local dev
       "https://geo-tracker-frontend-gtrd7evy7-nikhils-projects-f153eec7.vercel.app",
+      "https://geo-tracker-frontend-self.vercel.app",
     ],
     methods: ["GET", "POST"],
     credentials: true,
