@@ -5,6 +5,7 @@
 
 const express = require("express");
 const mongoose = require("mongoose");
+const cors = require("cors");
 
 const app = express();
 
@@ -50,6 +51,17 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
+
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173", // for local dev
+      "https://geo-tracker-frontend-gtrd7evy7-nikhils-projects-f153eec7.vercel.app",
+    ],
+    methods: ["GET", "POST"],
+    credentials: true,
+  }),
+);
 
 /* ===================== ROUTES ===================== */
 
@@ -219,7 +231,7 @@ app.get("/health", async (req, res) => {
             : dbState === 3
               ? "disconnecting"
               : "unknown";
-        
+
     res.status(200).json({
       success: true,
       status: "ok",
