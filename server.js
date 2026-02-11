@@ -202,6 +202,41 @@ app.get("/api/gps/trip", async (req, res) => {
   }
 });
 
+/* ============================================================
+   HEALTH CHECK (Better Stack Ready)
+============================================================ */
+app.get("/health", async (req, res) => {
+  try {
+    const dbState = mongoose.connection.readyState;
+
+    const dbStatus =
+      dbState === 0
+        ? "disconnected"
+        : dbState === 1
+          ? "connected"
+          : dbState === 2
+            ? "connecting"
+            : dbState === 3
+              ? "disconnecting"
+              : "unknown";
+        
+    res.status(200).json({
+      success: true,
+      status: "ok",
+      serverTime: new Date().toISOString(),
+      uptimeSeconds: process.uptime(),
+      environment: process.env.NODE_ENV || "development",
+      database: dbStatus,
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      status: "error",
+      message: err.message,
+    });
+  }
+});
+
 /* ===================== START SERVER ===================== */
 app.listen(PORT, () => {
   console.log(`🌍 Server running on port ${PORT}`);
