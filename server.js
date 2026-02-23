@@ -1,3 +1,222 @@
+/**
+ * server_reference.js
+ *
+ * Express + SQLite reference implementation providing CRUD endpoints for:
+ * - named locations (NAMED_LOCATIONS)
+ * - checkpoints (CHECKPOINTS)
+ * - segments markers (SEGMENTS_MARKER)
+ *
+ * Copy / paste this into your backend project. It can be used as a standalone
+ * server (node server_reference.js) or imported as a router to mount on an
+ * existing Express app.
+ *
+ * Dependencies:
+ *   npm i express sqlite sqlite3 cors
+ *
+ * Notes:
+ * - Uses `sqlite` open() wrapper for async/await access to SQLite.
+ * - Stores coordinates as two REAL columns (lat, lng); an optional `meta` JSON
+ *   text column is available for extra fields.
+ */
+
+import express from "express";
+import cors from "cors";
+import { open } from "sqlite";
+import sqlite3 from "sqlite3";
+
+const DB_FILE = process.env.LOCATIONS_DB || "markers.db";
+
+async function initDb() {
+  const db = await open({ filename: DB_FILE, driver: sqlite3.Database });
+  // Create tables if missing
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS named_locations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      meta TEXT,
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      updated_at INTEGER DEFAULT (strftime('%s','now'))
+    );
+    CREATE TABLE IF NOT EXISTS checkpoints (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      meta TEXT,
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      updated_at INTEGER DEFAULT (strftime('%s','now'))
+    );
+    CREATE TABLE IF NOT EXISTS segments_markers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      lat REAL,
+      lng REAL,
+      meta TEXT,
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      updated_at INTEGER DEFAULT (strftime('%s','now'))
+    );
+  `);
+  return db;
+}
+
+function makeRouter(db) {
+  const router = express.Router();
+
+  router.use(express.json());
+
+  // Generic helpers
+  async function list(table) {
+    return db.all(`SELECT * FROM ${table} ORDER BY id ASC`);
+  }
+  async function getById(table, id) {
+    return db.get(`SELECT * FROM ${table} WHERE id = ?`, id);
+  }
+  async function create(table, { name, lat, lng, meta }) {
+    const now = Math.floor(Date.now() / 1000);
+    const res = await db.run(
+      `INSERT INTO ${table} (name, lat, lng, meta, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      name,
+      lat,
+      lng,
+      meta ? JSON.stringify(meta) : null,
+      now,
+      now,
+    );
+    return getById(table, res.lastID);
+  }
+  async function update(table, id, { name, lat, lng, meta }) {
+    const now = Math.floor(Date.now() / 1000);
+    await db.run(
+      `UPDATE ${table} SET name = COALESCE(?, name), lat = COALESCE(?, lat), lng = COALESCE(?, lng), meta = COALESCE(?, meta), updated_at = ? WHERE id = ?`,
+      name,
+      lat,
+      lng,
+      meta ? JSON.stringify(meta) : null,
+      now,
+      id,
+    );
+    return getById(table, id);
+  }
+  async function remove(table, id) {
+    await db.run(`DELETE FROM ${table} WHERE id = ?`, id);
+    return { deleted: true, id };
+  }
+
+  // --- Named locations ---
+  router.get("/api/named-locations", async (req, res) => {
+    const rows = await list("named_locations");
+    res.json({ success: true, data: rows });
+  });
+  router.get("/api/named-locations/:id", async (req, res) => {
+    const row = await getById("named_locations", req.params.id);
+    if (!row)
+      return res.status(404).json({ success: false, message: "Not found" });
+    res.json({ success: true, data: row });
+  });
+  router.post("/api/named-locations", async (req, res) => {
+    const { name, lat, lng, meta } = req.body;
+    if (!name || typeof lat !== "number" || typeof lng !== "number")
+      return res
+        .status(400)
+        .json({ success: false, message: "name, lat, lng required" });
+    const created = await create("named_locations", { name, lat, lng, meta });
+    res.json({ success: true, data: created });
+  });
+  router.put("/api/named-locations/:id", async (req, res) => {
+    const updated = await update("named_locations", req.params.id, req.body);
+    res.json({ success: true, data: updated });
+  });
+  router.delete("/api/named-locations/:id", async (req, res) => {
+    const info = await remove("named_locations", req.params.id);
+    res.json({ success: true, data: info });
+  });
+
+  // --- Checkpoints ---
+  router.get("/api/checkpoints", async (req, res) => {
+    const rows = await list("checkpoints");
+    res.json({ success: true, data: rows });
+  });
+  router.get("/api/checkpoints/:id", async (req, res) => {
+    const row = await getById("checkpoints", req.params.id);
+    if (!row)
+      return res.status(404).json({ success: false, message: "Not found" });
+    res.json({ success: true, data: row });
+  });
+  router.post("/api/checkpoints", async (req, res) => {
+    const { name, lat, lng, meta } = req.body;
+    if (!name || typeof lat !== "number" || typeof lng !== "number")
+      return res
+        .status(400)
+        .json({ success: false, message: "name, lat, lng required" });
+    const created = await create("checkpoints", { name, lat, lng, meta });
+    res.json({ success: true, data: created });
+  });
+  router.put("/api/checkpoints/:id", async (req, res) => {
+    const updated = await update("checkpoints", req.params.id, req.body);
+    res.json({ success: true, data: updated });
+  });
+  router.delete("/api/checkpoints/:id", async (req, res) => {
+    const info = await remove("checkpoints", req.params.id);
+    res.json({ success: true, data: info });
+  });
+
+  // --- Segments markers (empty coords allowed) ---
+  router.get("/api/segments-markers", async (req, res) => {
+    const rows = await list("segments_markers");
+    res.json({ success: true, data: rows });
+  });
+  router.get("/api/segments-markers/:id", async (req, res) => {
+    const row = await getById("segments_markers", req.params.id);
+    if (!row)
+      return res.status(404).json({ success: false, message: "Not found" });
+    res.json({ success: true, data: row });
+  });
+  router.post("/api/segments-markers", async (req, res) => {
+    const { name, lat, lng, meta } = req.body;
+    // lat/lng optional for segments markers
+    if (!name)
+      return res.status(400).json({ success: false, message: "name required" });
+    const created = await create("segments_markers", { name, lat, lng, meta });
+    res.json({ success: true, data: created });
+  });
+  router.put("/api/segments-markers/:id", async (req, res) => {
+    const updated = await update("segments_markers", req.params.id, req.body);
+    res.json({ success: true, data: updated });
+  });
+  router.delete("/api/segments-markers/:id", async (req, res) => {
+    const info = await remove("segments_markers", req.params.id);
+    res.json({ success: true, data: info });
+  });
+
+  // Convenience: fetch all markers in one request
+  router.get("/api/markers", async (req, res) => {
+    const named = await list("named_locations");
+    const checkpoints = await list("checkpoints");
+    const segments = await list("segments_markers");
+    res.json({ success: true, data: { named, checkpoints, segments } });
+  });
+
+  return router;
+}
+
+// If run directly, start a small server
+if (process.argv[1].endsWith("server_reference.js")) {
+  (async () => {
+    const db = await initDb();
+    const app = express();
+    app.use(cors());
+    app.use(makeRouter(db));
+    const port = process.env.PORT || 4000;
+    app.listen(port, () => {
+      console.log(`Markers API listening on http://localhost:${port}`);
+    });
+  })();
+}
+
+export { initDb, makeRouter };
+
 /*****************************************************
  * ESP32 GPS Backend - Node.js + Express + MongoDB
  * Enhanced Version - Date Filter + Trip Analysis
