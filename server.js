@@ -76,7 +76,7 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173", // for local dev
-      "https://geo-tracker-frontend-self.vercel.app/",
+      "https://geo-tracker-frontend-self.vercel.app",
     ],
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
