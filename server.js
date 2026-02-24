@@ -43,6 +43,19 @@ const segmentSchema = new mongoose.Schema({ ...markerBase }, { timestamps: true 
 const NamedLocation = mongoose.model("NamedLocation", namedSchema);
 const Checkpoint = mongoose.model("Checkpoint", checkpointSchema);
 const SegmentMarker = mongoose.model("SegmentMarker", segmentSchema);
+// Segment pairs schema (start/end coordinates)
+const segmentPairSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    startLat: { type: Number, required: true },
+    startLng: { type: Number, required: true },
+    endLat: { type: Number, required: true },
+    endLng: { type: Number, required: true },
+    meta: { type: mongoose.Schema.Types.Mixed },
+  },
+  { timestamps: true },
+);
+const SegmentPair = mongoose.model("SegmentPair", segmentPairSchema);
 
 /* ===================== UTIL: DISTANCE ===================== */
 function distanceMeters(lat1, lon1, lat2, lon2) {
@@ -155,6 +168,32 @@ app.post("/api/segments-markers", async (req, res) => {
   const created = await SegmentMarker.create({ name, lat, lng, meta });
   res.json({ success: true, data: created });
 });
+
+/* ===================== Segment pairs (start/end) ===================== */
+app.get("/api/segments", async (req, res) => {
+  const rows = await SegmentPair.find().sort({ _id: 1 }).lean();
+  res.json({ success: true, data: rows });
+});
+app.get("/api/segments/:id", async (req, res) => {
+  const row = await SegmentPair.findById(req.params.id).lean();
+  if (!row) return res.status(404).json({ success: false, message: "Not found" });
+  res.json({ success: true, data: row });
+});
+app.post("/api/segments", async (req, res) => {
+  const { name, startLat, startLng, endLat, endLng, meta } = req.body;
+  if (!name || typeof startLat !== "number" || typeof startLng !== "number" || typeof endLat !== "number" || typeof endLng !== "number")
+    return res.status(400).json({ success: false, message: "name,startLat,startLng,endLat,endLng required" });
+  const created = await SegmentPair.create({ name, startLat, startLng, endLat, endLng, meta });
+  res.json({ success: true, data: created });
+});
+app.put("/api/segments/:id", async (req, res) => {
+  const updated = await SegmentPair.findByIdAndUpdate(req.params.id, req.body, { new: true }).lean();
+  res.json({ success: true, data: updated });
+});
+app.delete("/api/segments/:id", async (req, res) => {
+  await SegmentPair.findByIdAndDelete(req.params.id);
+  res.json({ success: true, data: { deleted: true, id: req.params.id } });
+});
 app.put("/api/segments-markers/:id", async (req, res) => {
   const updated = await SegmentMarker.findByIdAndUpdate(
     req.params.id,
@@ -172,19 +211,25 @@ app.delete("/api/segments-markers/:id", async (req, res) => {
 app.get("/api/markers", async (req, res) => {
   const named = await NamedLocation.find().lean();
   const checkpoints = await Checkpoint.find().lean();
-  const segments = await SegmentMarker.find().lean();
+  const segmentsPairs = await SegmentPair.find().lean();
   // normalize coords into coords array for frontend convenience
-  const norm = (rows) =>
+  const normPoint = (rows) =>
     rows.map((r) => ({
       ...r,
       coords: r.lat != null && r.lng != null ? [r.lat, r.lng] : null,
     }));
+  const normSegmentPair = (rows) =>
+    rows.map((r) => ({
+      ...r,
+      startCoords: r.startLat != null && r.startLng != null ? [r.startLat, r.startLng] : null,
+      endCoords: r.endLat != null && r.endLng != null ? [r.endLat, r.endLng] : null,
+    }));
   res.json({
     success: true,
     data: {
-      named: norm(named),
-      checkpoints: norm(checkpoints),
-      segments: norm(segments),
+      named: normPoint(named),
+      checkpoints: normPoint(checkpoints),
+      segments: normSegmentPair(segmentsPairs),
     },
   });
 });
